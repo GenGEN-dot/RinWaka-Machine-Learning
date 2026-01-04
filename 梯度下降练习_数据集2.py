@@ -65,17 +65,66 @@ def compute_loss_scheme2(X, y):
 #===========
 
 def compute_gradient_scheme1(X, y):
+
     """
     计算梯度
     方案1:k[0]作为偏置
     """
     num_samples = len(X)
-    gradients = [0.0 for _ in range(len(k1))]
+
+    gradients = [0.0 for _ in range(len(k1))]  # 初始化梯度列表，等价于初始化dk，dw
+    
     for i in range(num_samples):
+        # 1. 计算预测值
         prediction = sum(k1[j] * X[i][j] for j in range(len(k1)))
+        
+        # 2. 计算误差
         error = prediction - y[i]
+        
+        # 3. 累加每个参数的梯度
         for j in range(len(k1)):
-            gradients[j] += error * X[i][j]
+            gradients[j] += error * X[i][j]  # 第j个参数的梯度
+        
+    # 4. 计算平均梯度
     for j in range(len(k1)):
         gradients[j] /= num_samples
+        
     return gradients
+
+def compute_gradient_scheme2(X, y):
+    """
+    计算梯度
+    方案2:w作为偏置
+    """
+    num_samples = len(X)
+
+    dk = [0.0 for _ in range(len(k2))]  # 初始化斜率梯度列表
+    dw = 0.0                            # 初始化截距梯度
+
+    for i in range(num_samples):
+        # 1. 计算预测值
+        prediction = k2[0] * X[i][1] + k2[1] * X[i][2] + w2
+        
+        # 2. 计算误差
+        error = prediction - y[i]
+        
+        # 3. 累加斜率梯度和截距梯度
+        dk[0] += error * X[i][1]
+        dk[1] += error * X[i][2]
+        dw += error
+        
+    # 4. 计算平均梯度
+    for j in range(len(k2)):
+        dk[j] /= num_samples
+    dw /= num_samples
+
+    return dk, dw   
+
+def update_parameters_scheme1(k, gradients, learning_rate):
+    """
+    更新参数
+    方案1:k[0]作为偏置
+    """
+    for j in range(len(k)):
+        k[j] -= learning_rate * gradients[j]
+    return k
