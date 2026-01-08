@@ -51,6 +51,7 @@ class Gradient_Descent:
 
         m = len(X)
         total_error = 0.00
+        
         for i in range (m):
             prediction = sum( self.k[j] * X[i][j] for j in range(len(self.k)))
             error = prediction - y[i]
@@ -70,3 +71,5 @@ class Gradient_Descent:
             error = prediction - y[i]
             for j in range(len(self.k)):
                 gradients[j] += error * X[i][j]
+        
+        return gradients
