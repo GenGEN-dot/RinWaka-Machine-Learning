@@ -38,12 +38,44 @@ import numpy
 #============
 
 class Gradient_Descent:
+
     """
     梯度下降
     """
-    def __init__(self):
-        self.k = [0.00, 0.00, 0.00]  # 初始化参数
 
+    def __init__(self):
+        self.k = [0.00, 0.00, 0.00]  # 参数：k0, k1, k2
+        self.predictions = []        # 存储当前参数的预测值
+        self.X_current = None        # 当前使用的数据X（用于检查是否需要重新计算）
+        self.k_current = None        # 当前用于计算预测值的参数（用于检查是否需要重新计算）
+
+    def compute_predictions(self, X, force_recompute=False):
+        """
+        计算所有样本的预测值
+        force_recompute: 强制重新计算（即使参数和数据没变）
+        
+        为什么要有这个函数？
+        - 避免在compute_loss和compute_gradients中重复计算预测值
+        - 提高效率，尤其是在数据量大时
+        """
+        # 检查是否需要重新计算：
+        # 1. 预测值列表为空（第一次计算）
+        # 2. 数据X变了
+        # 3. 参数k变了
+        # 4. 强制重新计算
+        if (not self.predictions or X != self.X_current or self.k != self.k_current or force_recompute):
+            
+            self.predictions = []  # 清空旧的预测值
+            for i in range(len(X)):
+                pred = sum(self.k[j] * X[i][j] for j in range(len(self.k)))
+                self.predictions.append(pred)
+            
+            # 记录当前状态，方便下次检查
+            self.X_current = X[:] if isinstance(X, list) else X.copy()
+            self.k_current = self.k.copy()
+        
+        return self.predictions
+    
     def compute_loss(self, X, y):
         """
         Step1: 计算损失
@@ -51,9 +83,9 @@ class Gradient_Descent:
 
         m = len(X)
         total_error = 0.00
-        
+
         for i in range (m):
-            prediction = sum( self.k[j] * X[i][j] for j in range(len(self.k)))
+            prediction = self.predictions
             error = prediction - y[i]
             total_error += error ** 2
             loss = total_error / (2 * m)
@@ -67,9 +99,40 @@ class Gradient_Descent:
         gradients = [0.0 for _ in range(len(self.k))]
 
         for i in range(m):
-            prediction = sum( self.k[j] * X[i][j] for j in range(len(self.k)))
-            error = prediction - y[i]
+            prediction = self.predictions
             for j in range(len(self.k)):
                 gradients[j] += error * X[i][j]
+
+        for j in range(len(self.k)):
+            gradients[j] /= m
         
         return gradients
+    
+    def updata_parameters (self, gradients, learning_rate = 0.01):
+        """
+        参数更新
+        """
+        for j in range(len(self.k)):
+            self.k[j] -= learning_rate * gradients[j]
+        return self.k
+
+    def train(self, X, y, learning_rate, epochs):
+        """
+        完整训练流程
+        """
+        losses = []
+
+        for epoch in range(epochs):
+            predictions = self.predictions
+            loss = self.compute_loss
+            losses.append(loss)
+            for j in range(len(self.k))
+                gradients = self.compute_gradients
+
+
+def main():
+    pass
+
+
+if __name__ == "__main__":
+    main()
