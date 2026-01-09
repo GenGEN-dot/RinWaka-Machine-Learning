@@ -1,8 +1,29 @@
+"""
+GitHub连通性监控工具
+
+使用示例:
+  python github_monitor.py              # 使用默认5分钟间隔
+  python github_monitor.py -i 1         # 每分钟检查一次
+  python github_monitor.py -i 10        # 每10分钟检查一次
+  python github_monitor.py -i 0         # 只检查一次不循环
+  python github_monitor.py -i 2 -t 5    # 每2分钟检查一次，超时5秒
+  python github_monitor.py --test-notification  # 测试通知系统
+  python github_monitor.py --list-endpoints     # 列出监控端点
+
+功能:
+1. 监控GitHub连通性
+2. 连接失败时发送精简的Windows通知
+3. 自动保存日志并清理15天前的旧日志
+"""
+
 import requests
 import time
 import argparse
 import sys
-from datetime import datetime
+import os
+import json
+from datetime import datetime, timedelta
+from pathlib import Path
 
 class ConfigurableGitHubMonitor:
     def __init__(self, interval_minutes=5, check_timeout=8):
@@ -24,14 +45,94 @@ class ConfigurableGitHubMonitor:
             "主页": "https://github.com",
             "API": "https://api.github.com",
             "Raw文件": "https://raw.githubusercontent.com",
-            "状态页": "https://www.githubstatus.com/"
         }
         
+        # 初始化统计
         self.check_count = 0
         self.success_count = 0
         
+        # 创建日志目录
+        self.log_dir = Path("github_monitor_logs")
+        self.log_dir.mkdir(exist_ok=True)
+        
+        # 清理旧日志
+        self._cleanup_old_logs()
+        
+        # 创建本次运行的日志文件
+        self.session_log_file = self.log_dir / f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        self.session_log = []
+        
+    def _cleanup_old_logs(self):
+        """清理15天前的旧日志"""
+        cutoff_date = datetime.now() - timedelta(days=15)
+        
+        for log_file in self.log_dir.glob("*.log"):
+            try:
+                # 从文件名中提取时间信息
+                if log_file.name.startswith("session_"):
+                    file_date_str = log_file.stem.split("_")[1]  # 提取日期部分
+                    file_date = datetime.strptime(file_date_str, "%Y%m%d")
+                    
+                    # 如果是15天前的文件，删除它
+                    if file_date < cutoff_date.date():
+                        log_file.unlink()
+                        print(f"🗑️ 已删除旧日志: {log_file.name}")
+            except Exception as e:
+                print(f"⚠️ 处理日志文件时出错 {log_file}: {e}")
+    
+    def _log_session(self):
+        """保存本次运行的日志到文件"""
+        try:
+            with open(self.session_log_file, 'w', encoding='utf-8') as f:
+                f.write(f"GitHub监控会话日志 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"监控间隔: {self.interval_minutes}分钟\n")
+                f.write(f"检查超时: {self.check_timeout}秒\n")
+                f.write("=" * 60 + "\n\n")
+                
+                for log_entry in self.session_log:
+                    f.write(log_entry + "\n")
+                
+                # 添加统计信息
+                f.write("\n" + "=" * 60 + "\n")
+                f.write(f"📈 会话统计:\n")
+                f.write(f"   总检查次数: {self.check_count}\n")
+                f.write(f"   成功次数: {self.success_count}\n")
+                
+                if self.check_count > 0:
+                    success_rate = (self.success_count / self.check_count) * 100
+                    f.write(f"   成功率: {success_rate:.1f}%\n")
+                
+            print(f"📝 日志已保存到: {self.session_log_file}")
+        except Exception as e:
+            print(f"❌ 保存日志失败: {e}")
+    
+    def _add_to_session_log(self, message):
+        """添加消息到会话日志"""
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_entry = f"[{timestamp}] {message}"
+        self.session_log.append(log_entry)
+        print(log_entry)
+    
     def show_notification(self, title, message, urgent=False):
-        """显示Windows通知"""
+        """显示Windows通知 - 精简版本"""
+        # 精简通知消息，只显示关键信息
+        if len(message) > 200:  # 如果消息太长，进行截断
+            lines = message.split('\n')
+            # 保留最重要的几行
+            important_lines = []
+            for line in lines:
+                if '连接失败' in line or '连接超时' in line or '状态码' in line:
+                    important_lines.append(line)
+                if len(important_lines) >= 3:  # 最多显示3行重要信息
+                    break
+            
+            if not important_lines:
+                important_lines = lines[:3]  # 如果没有找到重要行，取前3行
+            
+            message = '\n'.join(important_lines)
+            if len(message) > 200:
+                message = message[:197] + "..."
+        
         try:
             # 尝试使用win10toast
             from win10toast import ToastNotifier
@@ -39,36 +140,33 @@ class ConfigurableGitHubMonitor:
             
             duration = 15 if urgent else 10
             
+            # 修复：去掉threaded参数或设为False
             toaster.show_toast(
                 title=title,
                 msg=message,
                 duration=duration,
-                threaded=True
+                threaded=False  # 改为False避免线程问题
             )
             return True
-        except ImportError:
-            # 如果未安装win10toast，尝试使用plyer
+        except Exception as e:
+            print(f"win10toast通知失败，尝试其他方法: {e}")
+            
+            # 尝试使用系统弹窗
             try:
-                from plyer import notification
-                notification.notify(
-                    title=title,
-                    message=message,
-                    app_name='GitHub监控',
-                    timeout=10,
-                )
-                return True
-            except ImportError:
-                # 最后使用系统弹窗
-                try:
-                    import ctypes
+                import ctypes
+                style = 0x40  # 信息图标
+                if urgent:
                     style = 0x30  # 警告图标
-                    if urgent:
-                        style = 0x10  # 错误图标
-                    ctypes.windll.user32.MessageBoxW(0, message, title, style)
-                    return True
-                except:
-                    print(f"无法显示通知: {title} - {message}")
-                    return False
+                
+                # 确保消息框显示在前台
+                style = style | 0x10000 | 0x40000  # MB_SETFOREGROUND | MB_TOPMOST
+                
+                # 显示消息框
+                ctypes.windll.user32.MessageBoxW(0, message, title, style)
+                return True
+            except Exception as e2:
+                print(f"系统弹窗也失败: {e2}")
+                return False
     
     def check_endpoint(self, name, url):
         """检查单个端点"""
@@ -92,8 +190,8 @@ class ConfigurableGitHubMonitor:
     def check_all_endpoints(self):
         """检查所有端点"""
         self.check_count += 1
-        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 第{self.check_count}次检查开始")
-        print("-" * 60)
+        self._add_to_session_log(f"第{self.check_count}次检查开始")
+        self._add_to_session_log("-" * 60)
         
         results = []
         response_times = []
@@ -108,7 +206,7 @@ class ConfigurableGitHubMonitor:
             if not success:
                 any_failed = True
             
-            print(message)
+            self._add_to_session_log(message)
             time.sleep(0.5)  # 稍微间隔一下，避免请求过快
         
         return any_failed, results, response_times
@@ -148,22 +246,35 @@ class ConfigurableGitHubMonitor:
         any_failed, results, response_times = self.check_all_endpoints()
         summary, urgent = self.generate_summary(any_failed, results, response_times)
         
-        print("-" * 60)
-        print(summary)
+        self._add_to_session_log("-" * 60)
+        self._add_to_session_log(summary)
         
         # 如果有问题，发送通知
         if any_failed:
-            message = f"GitHub连接检查失败\n\n" + "\n".join(results)
-            message += f"\n\n{summary}"
-            message += f"\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            # 精简通知消息 - 只显示失败的连接
+            failed_results = [r for r in results if not r.startswith("✅")]
+            success_results = [r for r in results if r.startswith("✅")]
             
-            title = "⚠️ 紧急：GitHub连接异常" if urgent else "⚠️ GitHub连接问题"
-            self.show_notification(title, message, urgent)
+            # 构建精简消息
+            if failed_results:
+                message = f"GitHub连接失败!\n\n" + "\n".join(failed_results)
+                if success_results:
+                    message += f"\n\n正常连接:\n" + "\n".join(success_results[:2])  # 最多显示2个正常连接
+                    if len(success_results) > 2:
+                        message += f"\n...还有{len(success_results)-2}个连接正常"
+                
+                # 确保消息不会太长
+                if len(message) > 500:
+                    message = message[:497] + "..."
+                
+                message += f"\n\n时间: {datetime.now().strftime('%H:%M:%S')}"
+                
+                title = "⚠️ 紧急：连接失败！请检查连接！" if urgent else "⚠️ 连接失败！请检查连接！"
+                self.show_notification(title, message, urgent)
         elif self.consecutive_failures > 0:
             # 刚刚恢复
             self.consecutive_failures = 0
-            recovery_msg = f"GitHub连接已恢复\n\n之前的连接问题已解决"
-            recovery_msg += f"\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            recovery_msg = f"GitHub连接已恢复!\n之前的连接问题已解决\n时间: {datetime.now().strftime('%H:%M:%S')}"
             self.show_notification("✅ GitHub连接恢复", recovery_msg)
         
         return not any_failed
@@ -173,7 +284,7 @@ class ConfigurableGitHubMonitor:
         total_seconds = self.interval_seconds
         interval_minutes = self.interval_minutes
         
-        print(f"\n⏳ 下次检查: {interval_minutes}分钟后 (按Ctrl+C停止)...")
+        self._add_to_session_log(f"\n⏳ 下次检查: {interval_minutes}分钟后 (按Ctrl+C停止)...")
         
         # 每10秒更新一次进度
         for remaining in range(total_seconds, 0, -10):
@@ -201,6 +312,10 @@ class ConfigurableGitHubMonitor:
         print("=" * 60)
         print("按 Ctrl+C 停止监控\n")
         
+        self._add_to_session_log("GitHub监控会话开始")
+        self._add_to_session_log(f"监控间隔: {self.interval_minutes}分钟")
+        self._add_to_session_log(f"检查超时: {self.check_timeout}秒")
+        
         try:
             while True:
                 self.run_check()
@@ -209,28 +324,48 @@ class ConfigurableGitHubMonitor:
                     self.show_waiting_progress()
                 else:
                     # 如果间隔为0，则只检查一次
+                    self._add_to_session_log("监控完成（间隔设置为0分钟）")
                     print("\n⏹️ 监控完成（间隔设置为0分钟）")
                     break
                     
         except KeyboardInterrupt:
+            self._add_to_session_log("监控已手动停止")
             print("\n\n👋 监控已手动停止")
         except Exception as e:
             error_msg = f"监控程序异常: {str(e)}"
+            self._add_to_session_log(f"错误: {error_msg}")
             print(f"\n❌ {error_msg}")
             self.show_notification("❌ GitHub监控错误", error_msg)
-        
-        # 显示最终统计
-        if self.check_count > 0:
-            print("\n" + "=" * 60)
-            print("📈 监控统计:")
-            print(f"   总检查次数: {self.check_count}")
-            print(f"   成功次数: {self.success_count}")
+        finally:
+            # 保存日志
+            self._log_session()
             
+            # 显示最终统计
             if self.check_count > 0:
-                success_rate = (self.success_count / self.check_count) * 100
-                print(f"   成功率: {success_rate:.1f}%")
-            
-            print("=" * 60)
+                print("\n" + "=" * 60)
+                print("📈 监控统计:")
+                print(f"   总检查次数: {self.check_count}")
+                print(f"   成功次数: {self.success_count}")
+                
+                if self.check_count > 0:
+                    success_rate = (self.success_count / self.check_count) * 100
+                    print(f"   成功率: {success_rate:.1f}%")
+                
+                print(f"   日志文件: {self.session_log_file}")
+                print("=" * 60)
+
+
+def print_usage_examples():
+    """打印使用示例"""
+    print("使用示例:")
+    print("  python github_monitor.py              # 使用默认5分钟间隔")
+    print("  python github_monitor.py -i 1         # 每分钟检查一次")
+    print("  python github_monitor.py -i 10        # 每10分钟检查一次")
+    print("  python github_monitor.py -i 0         # 只检查一次不循环")
+    print("  python github_monitor.py -i 2 -t 5    # 每2分钟检查一次，超时5秒")
+    print("  python github_monitor.py --test-notification  # 测试通知系统")
+    print("  python github_monitor.py --list-endpoints     # 列出监控端点")
+    print()
 
 
 def parse_arguments():
@@ -283,21 +418,29 @@ def test_notification_system():
     
     test_monitor = ConfigurableGitHubMonitor()
     
-    # 测试普通通知
-    print("1. 测试普通通知...")
+    # 测试精简通知
+    print("1. 测试精简通知...")
     test_monitor.show_notification(
         "测试通知",
-        "这是一个测试通知，如果你能看到这个，说明通知系统工作正常！"
+        "这是一个测试通知，消息内容比较短，应该能完全显示。"
     )
     
     time.sleep(2)
     
-    # 测试紧急通知
-    print("2. 测试紧急通知...")
+    # 测试长消息（会被自动精简）
+    print("2. 测试长消息通知...")
+    long_message = "GitHub连接失败!\n\n"
+    long_message += "⏰ 主页: 连接超时\n"
+    long_message += "✅ API: 542ms\n"
+    long_message += "✅ Raw文件: 321ms\n"
+    long_message += "⚠️ 状态页: 状态码 404\n"
+    long_message += "⏰ 另一个端点: 连接超时\n"
+    long_message += "✅ 又一个端点: 123ms\n"
+    long_message += "\n时间: 12:34:56"
+    
     test_monitor.show_notification(
-        "紧急测试",
-        "这是一个紧急测试通知！",
-        urgent=True
+        "⚠️ 连接测试",
+        long_message
     )
     
     print("✅ 通知测试完成，请检查是否收到通知")
@@ -306,6 +449,9 @@ def test_notification_system():
 
 def main():
     """主函数"""
+    # 打印使用示例
+    print_usage_examples()
+    
     args = parse_arguments()
     
     # 测试通知
@@ -351,7 +497,7 @@ if __name__ == "__main__":
         import requests
     except ImportError:
         print("❌ 未安装requests库，请先运行: pip install requests")
-        print("如果需要通知功能，请运行: pip install requests win10toast plyer")
+        print("如果需要通知功能，请运行: pip install win10toast")
         sys.exit(1)
     
     main()
