@@ -46,6 +46,13 @@ class Gradient_Descent:
     """
 
     def __init__(self, k_init=None, gradient_threshold=1e-15, param_threshold=1e-6, loss_threshold=1e-15):
+        """
+        self: 自引用初始化
+        k_init: 初始参数传入
+        gradient_threshold: 梯度阈值
+        param_threshold: 参数理论值
+        loss_threshold: 损失阈值
+        """
         if k_init is None:
             self.k = [0.00, 0.00, 0.00]         # 默认参数：k0, k1, k2
         else:
