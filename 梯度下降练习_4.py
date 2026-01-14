@@ -210,7 +210,7 @@ class Gradient_Descent:
         Args:
             X: 特征集
             y: 目标集
-    
+
         Returns:
             float: 损失值
         """
@@ -222,6 +222,61 @@ class Gradient_Descent:
         loss = np.sum(errors ** 2) / (2 * m)
     
         return loss
+    
+    def compute_loss_Old (self, X, y) -> float:
+        """
+        损失计算,但是纯循环计算的传统老方法
+        写这个函数只是为了对比两种方法(循环/向量化)的计算方式对比,两种函数在数学上应该是等价的
+        
+        Args:
+            X: 特征集
+            y: 目标集
+
+        Returns:
+            float: 损失值
+        """
+        m = len(y)
+        total_error = 0.00
+
+        for i in range(m):
+            preddictions = self.compute_predictions(X)
+            error = preddictions - y[i]
+            total_error += error ** 2
+            loss = total_error / (2 * m)
+
+        return loss
+    
+    def compute_gradients(self, X: np.ndarray, y: np.ndarray, k: list) -> np.ndarray:
+        """
+        梯度计算（完全向量化版本）
+
+        Args:
+            X: 特征集 (m, n)
+            y: 目标集 (m,)
+            k: 当前参数列表 (n+1个)
+
+        Returns:
+            np.ndarray: 梯度向量
+        """
+
+        m = len(X)
+
+        # 将参数列表转换为 numpy 数组
+        k_array = np.array(k)
+
+        # 在 X 前添加一列 1（截距项）
+        X_with_intercept = np.hstack([np.ones((m, 1)), X])
+
+        # 计算预测值
+        predictions = X_with_intercept @ k_array
+
+        # 计算误差
+        errors = predictions - y
+
+        # 向量化计算所有梯度：gradients = (1/m) * X^T @ errors
+        gradients = (X_with_intercept.T @ errors) / m
+
+        return gradients
 
 #============
 
